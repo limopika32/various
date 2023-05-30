@@ -1,0 +1,1446 @@
+/* todo
+wav to mp3でデータ量の変化がどうなるか
+
+*/
+
+	win_x = ginfo_dispx
+	win_y = ginfo_dispy
+	bgscr 0,win_x,win_y,2,0,0	;枠なしのウィンドウ
+
+	ntfnd="が見つかりませんでした。"
+	jdir="ディレクトリ"
+	jfil="ファイル"
+
+	// DIRチェック
+	dirlist buf,"dat",5
+	if stat = 0 : dialog "./dat/\n"+jdir+ntfnd,1,"DatabankError" : end
+	chdir "dat"
+
+	dirlist buf,"snd",5
+	if stat = 0 : dialog "./dat/snd/\n"+jdir+ntfnd,1,"DatabankError" : end
+	dirlist buf,"img",5
+	if stat = 0 : dialog "./dat/img/\n"+jdir+ntfnd,1,"DatabankError" : end
+	// DIRチェック ここまで
+
+	chdir "snd"
+	// 音声ファイルチェック
+	exist "click.wav":if strsize=-1:dialog "./dat/snd/click.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	exist "error.wav":if strsize=-1:dialog "./dat/snd/error.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	exist "done.wav":if strsize=-1:dialog "./dat/snd/done.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	exist "lock.wav":if strsize=-1:dialog "./dat/snd/lock.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	exist "start.wav":if strsize=-1:dialog "./dat/snd/start.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	exist "sure.wav":if strsize=-1:dialog "./dat/snd/sure.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	exist "back.wav":if strsize=-1:dialog "./dat/snd/back.wav\n"+jfil+ntfnd,1,"DatabankError" : end
+	// 音声ファイルチェック ここまで
+	
+	mmload "click.wav",10
+	mmload "error.wav",11
+	mmload "done.wav",12
+	mmload "lock.wav",13
+	mmload "start.wav",14
+	mmload "sure.wav",15
+	mmload "back.wav",16
+
+	
+	chdir "../img"
+	// 画像ファイルチェック
+	exist "pwricon.png":if strsize=-1:dialog "./dat/img/pwricon.png\nファイルが見つかりませんでした。",1,"DatabankError" : end
+	// 画像ファイルチェック ここまで
+	
+	celload "pwricon.png",4:celdiv 4,64,64
+	chdir "../../"
+
+
+	#packopt icon "invisible32.ico"
+	#packopt version "ver.txt"
+
+// -------------------------------------------------------------------- //
+	
+#include "hsp3util.as"
+#include "hspext.as"
+
+#uselib "user32.dll" 
+#func GetWindowLongA "GetWindowLongA" int , int 
+#func SetWindowLongA "SetWindowLongA" int , int , int 
+#func SetLayered "SetLayeredWindowAttributes" int , int , int , int  
+#func PostMessage "PostMessageA" sptr, sptr, sptr, sptr // ←二重起動検知用
+#func LockWorkStation "LockWorkStation"
+
+// -------------------------------------------------------------------- //
+
+#uselib "kernel32.dll"
+#func CreateFileMapping "CreateFileMappingA" sptr, sptr, sptr, sptr, sptr, sptr
+#func MapViewOfFile "MapViewOfFile" sptr, sptr, sptr, sptr, sptr
+#func UnmapViewOfFile "UnmapViewOfFile" sptr
+#func GetLastError "GetLastError"
+#func CloseHandle "CloseHandle" sptr
+#func RtlMoveMemory "RtlMoveMemory" sptr, sptr, sptr
+
+#define WM_USER_DUPEXEC	0x0401	;二重起動を知らせるメッセージを定義
+
+	onexit *exit
+	oncmd gosub *dupexec, WM_USER_DUPEXEC
+	
+	CreateFileMapping -1, 0, 4, 0, 260, "satellite"	;マッピングオブジェクト作成
+	hmapobj = stat
+	GetLastError
+	existflg = stat
+	MapViewOfFile hmapobj, 2, 0, 0, 0	;マッピング
+	pmapobj = stat
+	
+// -------------------------------------------------------------------- //
+
+
+onexit *exit
+
+	mainver="0.90"
+	subver ="SALS_211217_B"
+	lang=1 // 仮装備で未実装 日本語なら→1 英語なら→0
+	title "Satellite "+mainver
+	
+	sdim wd,4,2,7	//曜日
+	wd(0,0)="SUN":wd(0,1)="MON":wd(0,2)="TUE":wd(0,3)="WED":wd(0,4)="THU":wd(0,5)="FRI":wd(0,6)="SAT"
+	wd(1,0)="日":wd(1,1)="月":wd(1,2)="火":wd(1,3)="水":wd(1,4)="木":wd(1,5)="金":wd(1,6)="土"
+	erflg=0:ermst=0:pbflg=0
+	pflg=0:cflg=0:ctype=0:xflg=0:vrflg=1
+	ival=256
+
+	if existflg = 183 {	;二重起動だった場合
+		cmdline = dir_cmdline
+		RtlMoveMemory pmapobj+4, varptr(cmdline), 256	;共有メモリにコマンドライン文字列を格納
+		hwindow = 0
+		RtlMoveMemory varptr(hwindow), pmapobj, 4	;共有メモリから初回起動ウィンドウハンドルを取得
+		PostMessage hwindow, WM_USER_DUPEXEC, 0, 0	;二重起動されたことを初回起動ウィンドウに通知
+		UnmapViewOfFile pmapobj
+		CloseHandle hmapobj
+		end
+
+	} else {	;初回起動だった場合
+		hwindow = hwnd
+		RtlMoveMemory pmapobj, varptr(hwindow), 4	;共有メモリにウィンドウハンドルを格納
+	}
+	
+	mmplay 14
+	GetWindowLongA hwnd,-20 
+	SetWindowLongA hwnd,-20,stat | 0x00080000
+	buffer 2,win_x,win_y
+	color 0,0,0:gradf ,,,, 1, $000000, $606060
+	gsel 0,2
+	repeat 30
+	redraw 0
+	
+	setease 0,220,ease_cubic_out
+	ese=getease(cnt,30)
+	
+	SetLayered hwnd,0x000000,ese,2	// 0:塗りつぶし 1:透明 2:半透明
+	ese=win_y
+	pflg=cnt:gosub *psures
+	
+	gosub *sb2
+	ernum=cnt:gosub *ermsg
+	pos 0,0:gradf ,,,, 1, $000000, $606060
+	gosub *basedisp:gosub *sb1
+
+	color 0,0,0
+	setease win_y,(win_y/2-32)+220,ease_cubic_out
+	ese=getease(cnt,30)
+	gosub *pim0
+	pwr_x=win_x/2-32
+	pwr_y=ese
+	
+	await 2:redraw 1
+	loop
+	
+	pflg=0:xflg=0:ernum=0
+
+*main
+	redraw 0
+	gosub *basedisp
+	gosub *sb1
+	color 0,0,0
+	stick cclick,768,
+	switch cclick
+	
+		case 256	//メインクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=1
+			gosub *pdrw1
+		swbreak
+
+		case 512	//Subクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=2
+			gosub *pdrw1
+		swbreak
+
+		case 768	//Bothクリックしてる
+			cflg=cflg+1:ctype=3
+			gosub *pdrw1
+		swbreak
+		
+		default		//クリックしてない
+			switch ctype
+			 case 1		//Mクリックして離した
+			 	switch pflg
+			 	case 1		// PWR
+				if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64 {
+					exist "hspext.dll"
+					if strsize ! -1 {
+						ctype=0:pflg=0:cflg=0
+						mmplay 10
+						goto *schg
+					}else{
+						ctype=0:pflg=0:cflg=0
+						erflg=1:ernum=20
+					}
+				}else{
+					ctype=0:pflg=0:cflg=0
+				}
+				swbreak
+				
+				case 8		// VER
+				if mousey<=4{
+					ctype=0:cflg=0:pflg=0
+					mmplay 10
+					goto *ver
+				}else{
+					ctype=0:cflg=0:pflg=0
+				}
+				swbreak
+				
+				default
+				goto *exit
+				swbreak
+				swend
+			 swbreak
+
+			 case 2		//Sクリックして離した
+			 	goto *exit
+			 swbreak
+
+			 case 3		//Bクリックして離した
+			 	goto *exit
+			 swbreak
+			 
+			 default	//まだ一回もクリックしてない
+			 	// PWR
+			 	if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64{
+					gosub *pim1
+				}else{
+					gosub *pim0
+				}
+				// VER
+			 	if mousey<=4{
+					gosub *upper2
+				}else{
+					// 描写なし
+				}
+			 swbreak
+			swend
+		swbreak
+	swend
+	wait 2:redraw 1
+	goto *main
+
+*pwr
+	redraw 0
+	gosub *basedisp
+	gosub *sb2
+	color 0,0,0
+	stick cclick,768,
+	switch cclick
+	
+		case 256	//メインクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=1
+			gosub *pdrw2
+		swbreak
+
+		case 512	//Subクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=2
+			gosub *pdrw2
+		swbreak
+
+		case 768	//Bothクリックしてる
+			cflg=cflg+1:ctype=3
+			gosub *pdrw2
+		swbreak
+		
+		default		//クリックしてない
+			switch ctype
+			 case 1		//Mクリックして離した
+			 	switch pflg
+			 	case 1	// PWR
+				if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64{
+					ctype=0:cflg=0
+					mmplay 10
+					goto *psure1
+				}else{
+					goto *pwr2
+				}
+				swbreak
+				case 2	// PRB
+				if mousex>=prb_x and mousex<=prb_x+64 and mousey>=prb_y and mousey<=prb_y+64{
+					ctype=0:cflg=0
+					mmplay 10
+					goto *psure1
+				}else{
+					goto *pwr2
+				}
+				swbreak
+				case 3	// PLK
+				if mousex>=plk_x and mousex<=plk_x+64 and mousey>=plk_y and mousey<=plk_y+64{
+					ctype=0:cflg=0
+					mmplay 10
+					goto *psure1
+				}else{
+					goto *pwr2
+				}
+				swbreak
+				case 4	// PLG
+				if mousex>=plg_x and mousex<=plg_x+64 and mousey>=plg_y and mousey<=plg_y+64{
+					ctype=0:cflg=0
+					mmplay 10
+					goto *psure1
+				}else{
+					goto *pwr2
+				}
+				swbreak
+				case 5	// BACK
+				if mousey>=win_y-4{
+					ctype=0:cflg=0
+					mmplay 16
+					goto *schgb
+				}else{
+					goto *pwr2
+				}
+				swbreak
+				default
+				goto *exit
+				swend
+			 swbreak
+
+			 case 2		//Sクリックして離した
+			 	goto *exit
+			 swbreak
+
+			 case 3		//Bクリックして離した
+			 	goto *exit
+			 swbreak
+			 
+			 default	//まだ一回もクリックしてない
+			 	// PWR
+			 	if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64{
+					gosub *pim1
+				}else{
+					gosub *pim0
+				}
+				// PRB
+			 	if mousex>=prb_x and mousex<=prb_x+64 and mousey>=prb_y and mousey<=prb_y+64{
+					gosub *pim4
+				}else{
+					gosub *pim3
+				}
+				// PLK
+			 	if mousex>=plk_x and mousex<=plk_x+64 and mousey>=plk_y and mousey<=plk_y+64{
+					gosub *pim7
+				}else{
+					gosub *pim6
+				}
+				// PLG
+			 	if mousex>=plg_x and mousex<=plg_x+64 and mousey>=plg_y and mousey<=plg_y+64{
+					gosub *pima
+				}else{
+					gosub *pim9
+				}
+				// BACK
+			 	if mousey>=win_y-4{
+					gosub *back1
+				}else{
+					// 描写なし
+				}
+			 swbreak
+			swend
+		swbreak
+	swend
+	wait 2:redraw 1
+	goto *pwr
+
+*pwr2
+	if pflg!=0{
+		ctype=0:pflg=0:cflg=0
+	}else{
+		goto *exit
+	}
+	goto *pwr
+
+*psure1
+	buffer 1,win_x,win_y
+	gmode 0
+	pos 0,0:gcopy 0,0,0,win_x,win_y
+	gsel 0
+	
+	repeat 17
+	redraw 0
+	 setease 0,256,ease_cubic_in
+	 ese=getease(cnt,16)
+	gosub *basedisp
+	gosub *psures
+	switch ese
+	case 256:swbreak
+	default
+		gmode 3,,,256-ese
+		pos 0,0:gcopy 1,0,0,win_x,win_y
+	swend
+
+	// 消したり動いたり
+	color 0,0,0
+	setease 256,0,ease_cubic_out
+	ival=getease(cnt,16)
+	switch pflg
+	case 1
+	gosub *pim3
+	gosub *pim6
+	gosub *pim9
+	
+	ival=256
+	setease (win_x/2-32)-200,(win_x/2-32),ease_cubic_out
+	pwr_x=getease(cnt,17)
+	setease (win_y/2-32)-200,(win_y/2-32)-30,ease_cubic_out
+	pwr_y=getease(cnt,17)
+	gosub *pim0
+	swbreak
+	
+	case 2
+	gosub *pim0
+	gosub *pim6
+	gosub *pim9
+	
+	ival=256
+	setease (win_x/2-32)+200,(win_x/2-32),ease_cubic_out
+	prb_x=getease(cnt,17)
+	setease (win_y/2-32)-200,(win_y/2-32)-30,ease_cubic_out
+	prb_y=getease(cnt,17)
+	gosub *pim3
+	swbreak
+	
+	case 3
+	gosub *pim0
+	gosub *pim3
+	gosub *pim9
+
+	ival=256
+	setease (win_x/2-32)-200,(win_x/2-32),ease_cubic_out
+	plk_x=getease(cnt,17)
+	setease (win_y/2-32)+200,(win_y/2-32)-30,ease_cubic_out
+	plk_y=getease(cnt,17)
+	gosub *pim6
+	swbreak
+	
+	case 4
+	gosub *pim0
+	gosub *pim3
+	gosub *pim6
+
+	ival=256
+	setease (win_x/2-32)+200,(win_x/2-32),ease_cubic_out
+	plg_x=getease(cnt,17)
+	setease (win_y/2-32)+200,(win_y/2-32)-30,ease_cubic_out
+	plg_y=getease(cnt,17)
+	gosub *pim9
+	swbreak
+	swend
+
+	redraw 1
+	await 2
+	loop
+*psure2
+	redraw 0
+	gosub *basedisp
+	gosub *psures
+	color 0,0,0
+	stick cclick,768,
+	switch cclick
+	
+		case 256	//メインクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=1
+			gosub *pdrw3
+		swbreak
+
+		case 512	//Subクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=2
+			gosub *pdrw3
+		swbreak
+
+		case 768	//Bothクリックしてる
+			cflg=cflg+1:ctype=3
+			gosub *pdrw3
+		swbreak
+		
+		default		//クリックしてない
+			switch ctype
+			 case 1		//Mクリックして離した
+			 	switch pflg
+			 	case 1	// PWR
+				if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64 and xflg=1{
+					opt="shutdown -s -t 0"
+					goto *oprat
+				}else{
+					if xflg=1{
+						ctype=0:xflg=0:cflg=0
+					}else{
+						gosub *psure3
+					}
+				}
+				swbreak
+				case 2	// PRB
+				if mousex>=prb_x and mousex<=prb_x+64 and mousey>=prb_y and mousey<=prb_y+64 and xflg=2{
+					opt="shutdown -r -t 0"
+					goto *oprat
+				}else{
+					if xflg=2{
+						ctype=0:xflg=0:cflg=0
+					}else{
+						gosub *psure3
+					}
+				}
+				swbreak
+				case 3	// PLK
+				if mousex>=plk_x and mousex<=plk_x+64 and mousey>=plk_y and mousey<=plk_y+64 and xflg=3{
+					goto *oprat
+				}else{
+					if xflg=3{
+						ctype=0:xflg=0:cflg=0
+					}else{
+						gosub *psure3
+					}
+				}
+				swbreak
+				case 4	// PLG
+				if mousex>=plg_x and mousex<=plg_x+64 and mousey>=plg_y and mousey<=plg_y+64 and xflg=4{
+					opt="shutdown -l"
+					goto *oprat
+				}else{
+					if xflg=4{
+						ctype=0:xflg=0:cflg=0
+					}else{
+						gosub *psure3
+					}
+				}
+				swbreak
+				swend
+			 swbreak
+
+			 case 2		//Sクリックして離した
+			 	goto *exit
+			 swbreak
+
+			 case 3		//Bクリックして離した
+			 	goto *exit
+			 swbreak
+			 
+			 default	//まだ一回もクリックしてない
+			 	switch pflg
+			 	case 1	// PWR
+			 	if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64{
+					gosub *pim1
+				}else{
+					gosub *pim0
+				}
+				swbreak
+				case 2	// PRB
+			 	if mousex>=prb_x and mousex<=prb_x+64 and mousey>=prb_y and mousey<=prb_y+64{
+					gosub *pim4
+				}else{
+					gosub *pim3
+				}
+				swbreak
+				case 3	// PLK
+			 	if mousex>=plk_x and mousex<=plk_x+64 and mousey>=plk_y and mousey<=plk_y+64{
+					gosub *pim7
+				}else{
+					gosub *pim6
+				}
+				swbreak
+				case 4	// PLG
+			 	if mousex>=plg_x and mousex<=plg_x+64 and mousey>=plg_y and mousey<=plg_y+64{
+					gosub *pima
+				}else{
+					gosub *pim9
+				}
+				swbreak
+				swend
+
+				// BACK
+			 	if mousey>=win_y-4{
+					gosub *back1
+				}else{
+					// 描写なし
+				}
+			 swbreak
+			swend
+		swbreak
+	swend
+	wait 2:redraw 1
+	goto *psure2
+
+*psure3
+	// BACK
+	if mousey>=win_y-4 and xflg=5{
+		mmplay 16
+		goto *psureb
+	}else{
+		if xflg=5{
+			ctype=0:xflg=0:cflg=0
+		}else{
+			goto *exit
+		}
+	}
+	return
+
+*oprat
+	pflg=pflg+10
+	mmplay 12
+	
+	repeat 45
+	redraw 0
+	setease 220,0,ease_cubic_in
+	ese=getease(cnt,37)
+	SetLayered hwnd,0x000000,ese,2
+	gradf ,,,, 1, $000000, $606060
+	
+	color 0,0,0
+	setease 256,0,ease_cubic_out
+	ival=getease(cnt,20)
+	switch pflg
+	case 11	// PWR
+	gosub *pim0
+	swbreak
+	case 12	// PRB
+	gosub *pim3
+	swbreak
+	case 13	// PLK
+	gosub *pim6
+	swbreak
+	case 14	// PLG
+	gosub *pim9
+	swbreak
+	swend
+		
+	setease 15,0,ease_cubic_out
+	ese=getease(cnt,43)
+	gosub *psures
+	pos 0,0
+	await 2:redraw 1
+	loop
+	
+	if pflg=13{
+		LockWorkStation
+		wait 15
+	}else{
+		exist "hspext.dll"
+		if strsize=-1:dialog "hspext.dll が見つかりません",1,"DLL Error" : end
+		
+		pipeexec buf1,opt,0
+		
+		repeat
+		pipeget buf2
+		if stat=0:break
+		wait 1
+		loop
+	}
+	end
+
+*psures
+	color 255,255,255
+	switch pflg
+	case 1
+		pos ps1_x,ps1_y
+		mes "もう一度クリックしてシャットダウン"
+		ps1_x=win_x/2-ginfo(14)/2
+		ps1_y=(win_y/2-ginfo(15)/2)+15
+		swbreak
+	case 2
+		pos ps2_x,ps2_y
+		mes "もう一度クリックして再起動"
+		ps2_x=win_x/2-ginfo(14)/2
+		ps2_y=(win_y/2-ginfo(15)/2)+15
+		swbreak
+	case 3
+		pos ps3_x,ps3_y
+		mes "もう一度クリックしてロックダウン"
+		ps3_x=win_x/2-ginfo(14)/2
+		ps3_y=(win_y/2-ginfo(15)/2)+15
+		swbreak
+	case 4
+		pos ps4_x,ps4_y
+		mes "もう一度クリックしてサインアウト"
+		ps4_x=win_x/2-ginfo(14)/2
+		ps4_y=(win_y/2-ginfo(15)/2)+15
+		swbreak
+	case 11
+		pos ps1_fx,ps1_fy
+		mes "シャットダウンしています..."
+		ps1_fx=win_x/2-ginfo(14)/2
+		ps1_fy=(win_y/2-ginfo(15)/2)+ese
+		swbreak
+	case 12
+		pos ps2_fx,ps2_fy
+		mes "再起動しています..."
+		ps2_fx=win_x/2-ginfo(14)/2
+		ps2_fy=(win_y/2-ginfo(15)/2)+ese
+		swbreak
+	case 13
+		pos ps3_fx,ps3_fy
+		mes "ロックダウンしています..."
+		ps3_fx=win_x/2-ginfo(14)/2
+		ps3_fy=(win_y/2-ginfo(15)/2)+ese
+		swbreak
+	case 14
+		pos ps4_fx,ps4_fy
+		mes "サインアウトしています..."
+		ps4_fx=win_x/2-ginfo(14)/2
+		ps4_fy=(win_y/2-ginfo(15)/2)+ese
+		swbreak
+	default
+		pos ps5_x,ps5_y
+		mes "不可解なエラー"
+		ps5_x=win_x/2-ginfo(14)/2
+		ps5_y=(win_y/2-ginfo(15)/2)+15
+	swend
+	return
+
+*psureb
+	buffer 1,win_x,win_y
+	gmode 0
+	pos 0,0:gcopy 0,0,0,win_x,win_y
+	gsel 0
+	
+	repeat 17
+	redraw 0
+	 setease 0,256,ease_cubic_out
+	 ese=getease(cnt,16)
+	gosub *basedisp
+	gosub *sb2
+	switch ese
+	case 256:swbreak
+	default
+		gmode 3,,,256-ese
+		pos 0,0:gcopy 1,0,0,win_x,win_y
+	swend
+
+	// 戻ったり動いたり
+	color 0,0,0
+	setease 0,256,ease_cubic_out
+	ival=getease(cnt,16)
+	switch pflg
+	case 1
+	gosub *pim3
+	gosub *pim6
+	gosub *pim9
+	
+	ival=256
+	setease (win_x/2-32),(win_x/2-32)-200,ease_cubic_out
+	pwr_x=getease(cnt,17)
+	setease (win_y/2-32)-30,(win_y/2-32)-200,ease_cubic_out
+	pwr_y=getease(cnt,17)
+	gosub *pim0
+	swbreak
+	
+	case 2
+	gosub *pim0
+	gosub *pim6
+	gosub *pim9
+	
+	ival=256
+	setease (win_x/2-32),(win_x/2-32)+200,ease_cubic_out
+	prb_x=getease(cnt,17)
+	setease (win_y/2-32)-30,(win_y/2-32)-200,ease_cubic_out
+	prb_y=getease(cnt,17)
+	gosub *pim3
+	swbreak
+	
+	case 3
+	gosub *pim0
+	gosub *pim3
+	gosub *pim9
+
+	ival=256
+	setease (win_x/2-32),(win_x/2-32)-200,ease_cubic_out
+	plk_x=getease(cnt,17)
+	setease (win_y/2-32)-30,(win_y/2-32)+200,ease_cubic_out
+	plk_y=getease(cnt,17)
+	gosub *pim6
+	swbreak
+	
+	case 4
+	gosub *pim0
+	gosub *pim3
+	gosub *pim6
+
+	ival=256
+	setease (win_x/2-32),(win_x/2-32)+200,ease_cubic_out
+	plg_x=getease(cnt,17)
+	setease (win_y/2-32)-30,(win_y/2-32)+200,ease_cubic_out
+	plg_y=getease(cnt,17)
+	gosub *pim9
+	swbreak
+	swend
+
+	redraw 1
+	await 2
+	loop
+	
+	ctype=0:pflg=0:cflg=0:xflg=0:ival=256
+	goto *pwr
+
+*ver1
+	redraw 0
+	si1_x=win_x
+	if vrflg<1{
+		gosub *basedisp
+		gosub *sb3
+	}
+	
+	stick cclick,768,
+	switch cclick
+	
+		case 256	//メインクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=1
+			gosub *pdrwb
+		swbreak
+
+		case 512	//Subクリックしてる
+			cflg=cflg+1
+			if ctype!=3:ctype=2
+			gosub *pdrwb
+		swbreak
+
+		case 768	//Bothクリックしてる
+			cflg=cflg+1:ctype=3
+			gosub *pdrwb
+		swbreak
+		
+		default		//クリックしてない
+			switch ctype
+			 case 1		//Mクリックして離した
+			 	// BACK
+			 	if mousey>=win_y-4 and pflg=5{
+				 	vrflg=0
+					ctype=0:cflg=0:pflg=0
+					mmplay 16
+					goto *verb
+				}else{
+					if pflg=5{
+						ctype=0:cflg=0:pflg=0
+					}else{
+						goto *exit
+					}
+				}
+			 swbreak
+
+			 case 2		//Sクリックして離した
+			 	goto *exit
+			 swbreak
+
+			 case 3		//Bクリックして離した
+			 	goto *exit
+			 swbreak
+			 
+			 default	//まだ一回もクリックしてない
+				// BACK
+			 	if mousey>=win_y-4{
+				 	vrflg=2
+					gosub *back1
+				}else{
+					if vrflg=2:vrflg=0
+					// 描写なし
+				}
+			 swbreak
+			swend
+		swbreak
+	swend
+	
+	wait 2:redraw 1
+	goto *ver1
+	
+
+*basedisp
+	pos 0,0
+	gmode 0
+	gcopy 2,0,0,win_x,win_y
+	color 255,255,255:font "Segoe UI",14
+	pos si1_x,0:mes "Satelite Ver "+mainver+"  |  MEMUSED:"+sysinfo(33)+"%"
+	si1_x=win_x/2-ginfo(14)/2
+
+	if erflg=1 {
+		mmplay 11
+		erflg=2
+		ermst=0
+	}
+	if erflg=2 {
+		ermst=ermst+1
+		if ermst<=30 {
+			setease 0,(win_y/24),ease_quad_out
+			emese=getease(ermst,29)
+			gradf 0,0,,emese, 1, $ff6060, $880000
+			
+			setease 0-(win_y/24),0,ease_quad_out
+			emese=getease(ermst,29)
+			gosub *ermsg
+		}
+		if ermst>30 and ermst<350 {
+			gradf 0,0,,(win_y/24), 1, $ff6060, $880000
+			emese=0:gosub *ermsg
+		}
+		if ermst>=350 {
+			setease (win_y/24),0,ease_quad_out
+			emese=getease(ermst-350,29)
+			gradf 0,0,,emese, 1, $ff6060, $880000
+
+			setease 0,0-(win_y/24),ease_quad_out
+			emese=getease(ermst-350,29)
+			gosub *ermsg
+		}
+		if ermst>380 {
+			erflg=0:ermst=0:ernum=0
+		}
+	}
+	
+	sysfont
+	return
+
+*sb1
+	// 日時
+	if gettime(1) >= 0 and gettime(1) <= 9 {mth="0"+gettime(1)}else{mth=""+gettime(1)}
+	if gettime(3) >= 0 and gettime(3) <= 9 {day="0"+gettime(3)}else{day=""+gettime(3)}
+	if gettime(4) >= 0 and gettime(4) <= 9 {hor="0"+gettime(4)}else{hor=""+gettime(4)}
+	if gettime(5) >= 0 and gettime(5) <= 9 {min="0"+gettime(5)}else{min=""+gettime(5)}
+	if gettime(6) >= 0 and gettime(6) <= 9 {sec="0"+gettime(6)}else{sec=""+gettime(6)}
+
+	color 128,128,128:textmode 1,1:text 0:color 255,255,255
+	font "Segoe UI",48
+	pos clk_x,clk_y:emes ""+hor+":"+min+":"+sec
+	clk_x=win_x/2-ginfo(14)/2
+	clk_y=(win_y/2-ginfo(15)/2)-30
+	
+	font "Segoe UI",22
+	pos dat_x,dat_y:emes ""+gettime(0)+"/"+mth+"/"+day+" ("+wd(0,gettime(2))+")"
+	dat_x=win_x/2-ginfo(14)/2
+	dat_y=(win_y/2-ginfo(15)/2)+10
+	return
+
+*sb2
+	// 電源
+	color 128,128,128:textmode 1,1:text 0:color 255,255,255
+	font "Segoe UI",32
+	pos pws_x,pws_y:emes "Power option"
+	pws_x=win_x/2-ginfo(14)/2
+	pws_y=win_y/2-ginfo(15)/2
+	return
+
+*sb3
+	color 255,255,255
+	
+		font "Segoe UI",78
+		pos (win_x/3)-100,(win_y/8):emes "Satellite"
+		font "Segoe UI",24
+		pos win_x-win_x/3+10,(win_y/8)+40:mes "Ver. "+mainver
+		font "Segoe UI",16
+		pos win_x-win_x/3-20,(win_y/8)+68:mes "("+subver+")"
+		pos (win_x/2)+10,(win_y/8)+68:mes "(C) limop - 2020-2022"
+		
+		line (win_x/3)-110,(win_y/8)+100,win_x-((win_x/3)-110),(win_y/8)+100
+
+		font "Segoe UI",20
+		pos (win_x/3)-90,(win_y/8)+120
+		mes	{"
+Version 0.90 (SALS_211217_B) 更新に伴う変更点
+  -  アプリ軽量化に伴い、一部の挙動を添削しました。
+  -  詳細バージョン表記を変更しました。
+
+Version 0.85 (RW210323) 更新に伴う変更点
+  -  アプリ名を  Satellite(サテライト)  に  \"とりあえず\"  決定しました。←
+  -  「Satelliteについて」画面を追加しました。
+  -  タイトルバーの文字を変えていない事に気づき急遽修正をかましました。
+  -  「URL Cutter for Amazon」と動作が競合する不具合を修正しました。
+  -  システム音を変更しました。
+"}
+		vrflg=1
+	
+	sysfont	
+	return
+
+*ermsg
+	pos emc_x,emc_y
+	font "Segoe UI",(win_y/48):color 255,255,255
+	switch ernum
+	case 1
+		mes "アプリの二重起動はできません  (01)"
+		swbreak
+	case 20
+		mes "hspext.dll が見つからないため使用できません  (20)"
+		swbreak
+	default
+		mes "不明なエラーが発生しました  (00)"
+		swbreak
+	swend
+	
+	emc_x=win_x/2-ginfo(14)/2
+	emc_y=(win_y/48-ginfo(15)/2)+emese
+	return
+
+*pim0 //pwr
+	pos pwr_x,pwr_y
+	gmode 4,64,64,ival
+	celput 4,0
+	return
+*pim1
+	pos pwr_x,pwr_y
+	gmode 2,64,64
+	celput 4,1
+	return
+*pim2
+	pos pwr_x,pwr_y
+	gmode 2,64,64
+	celput 4,2
+	return
+*pim3 //reb
+	pos prb_x,prb_y
+	gmode 4,64,64,ival
+	celput 4,3
+	return
+*pim4
+	pos prb_x,prb_y
+	gmode 2,64,64
+	celput 4,4
+	return
+*pim5
+	pos prb_x,prb_y
+	gmode 2,64,64
+	celput 4,5
+	return
+*pim6 // loc
+	pos plk_x,plk_y
+	gmode 4,64,64,ival
+	celput 4,6
+	return
+*pim7
+	pos plk_x,plk_y
+	gmode 2,64,64
+	celput 4,7
+	return
+*pim8
+	pos plk_x,plk_y
+	gmode 2,64,64
+	celput 4,8
+	return
+*pim9 // lgo
+	pos plg_x,plg_y
+	gmode 4,64,64,ival
+	celput 4,9
+	return
+*pima
+	pos plg_x,plg_y
+	gmode 2,64,64
+	celput 4,10
+	return
+*pimb
+	pos plg_x,plg_y
+	gmode 2,64,64
+	celput 4,11
+	return
+
+*back1
+	color 128,128,128
+	boxf 0,win_y-4,win_x,win_y
+	return
+*back2
+	color 64,64,64
+	boxf 0,win_y-4,win_x,win_y
+	return
+
+*upper1
+	color 128,128,128
+	boxf 0,0,win_x,4
+	return
+*upper2
+	color 64,64,64
+	boxf 0,0,win_x,4
+	return
+	
+
+*pdrw1
+	// PWR
+	if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64 {
+		if cflg=1{
+			pflg=1
+		}else{
+			if pflg=1{
+				gosub *pim2
+			}else{
+				gosub *pim0
+			}
+		}
+	}else{
+		gosub *pim0
+	}
+	// VER
+	if mousey<=4 {
+		if cflg=1{
+			pflg=8
+		}else{
+			if pflg=8{
+				gosub *upper1
+			}else{
+				// 描写なし
+			}
+		}
+	}
+	return
+
+*pdrw2
+	// PWR
+	if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64 {
+		if cflg=1{
+			pflg=1
+		}else{
+			if pflg=1{
+				gosub *pim2
+			}else{
+				gosub *pim0
+			}
+		}
+	}else{
+		gosub *pim0
+	}
+	// PRB
+	if mousex>=prb_x and mousex<=prb_x+64 and mousey>=prb_y and mousey<=prb_y+64 {
+		if cflg=1{
+			pflg=2
+		}else{
+			if pflg=2{
+				gosub *pim5
+			}else{
+				gosub *pim3
+			}
+		}
+	}else{
+		gosub *pim3
+	}
+	// PLK
+	if mousex>=plk_x and mousex<=plk_x+64 and mousey>=plk_y and mousey<=plk_y+64 {
+		if cflg=1{
+			pflg=3
+		}else{
+			if pflg=3{
+				gosub *pim8
+			}else{
+				gosub *pim6
+			}
+		}
+	}else{
+		gosub *pim6
+	}
+	// PLG
+	if mousex>=plg_x and mousex<=plg_x+64 and mousey>=plg_y and mousey<=plg_y+64 {
+		if cflg=1{
+			pflg=4
+		}else{
+			if pflg=4{
+				gosub *pimb
+			}else{
+				gosub *pim9
+			}
+		}
+	}else{
+		gosub *pim9
+	}
+	gosub *pdrwb	// BACK
+	return
+
+*pdrw3
+	switch pflg
+	case 1	// PWR
+	if mousex>=pwr_x and mousex<=pwr_x+64 and mousey>=pwr_y and mousey<=pwr_y+64 {
+		if cflg=1{
+			xflg=1
+		}else{
+			if xflg=1{
+				gosub *pim2
+			}else{
+				gosub *pim0
+			}
+		}
+	}else{
+		gosub *pim0
+	}
+	swbreak
+	case 2	// PRB
+	if mousex>=prb_x and mousex<=prb_x+64 and mousey>=prb_y and mousey<=prb_y+64 {
+		if cflg=1{
+			xflg=2
+		}else{
+			if xflg=2{
+				gosub *pim5
+			}else{
+				gosub *pim3
+			}
+		}
+	}else{
+		gosub *pim3
+	}
+	swbreak
+	case 3	// PLK
+	if mousex>=plk_x and mousex<=plk_x+64 and mousey>=plk_y and mousey<=plk_y+64 {
+		if cflg=1{
+			xflg=3
+		}else{
+			if xflg=3{
+				gosub *pim8
+			}else{
+				gosub *pim6
+			}
+		}
+	}else{
+		gosub *pim6
+	}
+	swbreak
+	case 4	// PLG
+	if mousex>=plg_x and mousex<=plg_x+64 and mousey>=plg_y and mousey<=plg_y+64 {
+		if cflg=1{
+			xflg=4
+		}else{
+			if xflg=4{
+				gosub *pimb
+			}else{
+				gosub *pim9
+			}
+		}
+	}else{
+		gosub *pim9
+	}
+	swbreak
+	swend
+	// BACK
+	if mousey>=win_y-4 {
+		if cflg=1{
+			xflg=5
+		}else{
+			if xflg=5{
+				gosub *back2
+			}else{
+				// 描写なし
+			}
+		}
+	}
+	return
+
+*pdrwb
+	// BACK
+	if mousey>=win_y-4 {
+		if cflg=1{
+			pflg=5
+		}else{
+			if pflg=5{
+				gosub *back2
+			}else{
+				// 描写なし
+			}
+		}
+	}
+	return
+
+*schg
+	buffer 1,win_x,win_y
+	gmode 0
+	pos 0,0:gcopy 0,0,0,win_x,win_y
+	gsel 0
+	
+	repeat 17
+	redraw 0
+	 setease 0,256,ease_cubic_out
+	 ese=getease(cnt,16)
+	gosub *basedisp
+	gosub *sb2
+	
+	switch ese
+	case 256:swbreak
+	default
+		gmode 3,,,256-ese
+		pos 0,0:gcopy 1,0,0,win_x,win_y
+	swend
+
+
+	ival=256:color 0,0,0
+	setease (win_x/2-32),(win_x/2-32)-200,ease_cubic_out
+	pwr_x=getease(cnt,17)
+	setease (win_y/2-32)+220,(win_y/2-32)-200,ease_cubic_out
+	pwr_y=getease(cnt,17)
+	gosub *pim0
+	
+	setease 0,256,ease_cubic_out
+	ival=getease(cnt,17)
+	
+	setease 800,200,ease_cubic_out
+	ese=getease(cnt,17)
+
+	prb_x=(win_x/2-32)+ese
+	prb_y=(win_y/2-32)-ese
+	gosub *pim3
+	
+	plk_x=(win_x/2-32)-ese
+	plk_y=(win_y/2-32)+ese
+	gosub *pim6
+
+	plg_x=(win_x/2-32)+ese
+	plg_y=(win_y/2-32)+ese
+	gosub *pim9
+	
+	redraw 1:await 2
+	loop
+	
+	goto *pwr
+
+*schgb
+	buffer 1,win_x,win_y
+	gmode 0
+	pos 0,0:gcopy 0,0,0,win_x,win_y
+	gsel 0
+	
+	repeat 17
+	redraw 0
+	 setease 0,256,ease_cubic_out
+	 ese=getease(cnt,16)
+	gosub *basedisp
+	gosub *sb1
+	
+	switch ese
+	case 256:swbreak
+	default
+		gmode 3,,,256-ese
+		pos 0,0:gcopy 1,0,0,win_x,win_y
+	swend
+
+	color 0,0,0:ival=256
+	setease (win_x/2-32)-200,(win_x/2-32),ease_cubic_out
+	pwr_x=getease(cnt,17)
+	setease (win_y/2-32)-200,(win_y/2-32)+220,ease_cubic_out
+	pwr_y=getease(cnt,17)
+	gosub *pim0
+	
+	setease 256,0,ease_cubic_in
+	ival=getease(cnt,16)
+	
+
+	setease 200,800,ease_cubic_in
+	ese=getease(cnt,17)
+
+	prb_x=(win_x/2-32)+ese
+	prb_y=(win_y/2-32)-ese
+	gosub *pim3
+	
+	plk_x=(win_x/2-32)-ese
+	plk_y=(win_y/2-32)+ese
+	gosub *pim6
+
+	plg_x=(win_x/2-32)+ese
+	plg_y=(win_y/2-32)+ese
+	gosub *pim9
+	
+	redraw 1:await 2
+	loop
+	
+	ctype=0:pflg=0:cflg=0:ival=256
+	goto *main
+
+*ver
+	buffer 1,win_x,win_y
+	gmode 0
+	pos 0,0:gcopy 0,0,0,win_x,win_y
+	gsel 0
+	
+	repeat 17
+	redraw 0
+	 setease 0,256,ease_cubic_out
+	 ese=getease(cnt,16)
+	si1_x=win_x
+	vrflg=0
+	gosub *basedisp
+	gosub *sb3
+	
+	switch ese
+	case 256:swbreak
+	default
+		gmode 3,,,256-ese
+		pos 0,0:gcopy 1,0,0,win_x,win_y
+	swend
+
+	setease 256,0,ease_cubic_out
+	ival=getease(cnt,16):color 0,0,0
+	setease (win_y/2-32)+220,win_y,ease_cubic_out
+	pwr_x=win_x/2-32
+	pwr_y=getease(cnt,17)
+	gosub *pim0
+	
+	redraw 1:await 2
+	loop
+	
+	goto *ver1
+
+*verb
+	buffer 1,win_x,win_y
+	gmode 0
+	pos 0,0:gcopy 0,0,0,win_x,win_y
+	gsel 0
+	
+	repeat 17
+	redraw 0
+	 setease 0,256,ease_cubic_out
+	 ese=getease(cnt,16)
+	gosub *basedisp
+	gosub *sb1
+	
+	switch ese
+	case 256:swbreak
+	default
+		gmode 3,,,256-ese
+		pos 0,0:gcopy 1,0,0,win_x,win_y
+	swend
+
+	setease 0,256,ease_cubic_out
+	ival=getease(cnt,16):color 0,0,0
+	setease win_y,(win_y/2-32)+220,ease_cubic_out
+	pwr_x=win_x/2-32
+	pwr_y=getease(cnt,17)
+	gosub *pim0
+	
+	redraw 1:await 2
+	loop
+	
+	goto *main
+	
+
+*dupexec	;初回起動ウィンドウが二重起動通知を受けたときの処理
+	sdim cmdline, 256
+	RtlMoveMemory varptr(cmdline), pmapobj+4, 256	;共有メモリからコマンドライン文字列を取得
+	erflg=1:ernum=1
+	return
+	
+*exit
+	mmplay 13
+	repeat 30
+	redraw 0
+	setease 220,0,ease_cubic_out
+	ese=getease(cnt,30)
+	SetLayered hwnd,0x000000,ese,2	
+	gradf ,,,, 1, $000000, $606060
+	pos 0,0
+	redraw 1:await 2
+	loop
+	wait 20
+	end

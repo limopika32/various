@@ -1,0 +1,269 @@
+#include "hspext.as"
+#include "kernel32.as"
+#include "hsp3util.as"
+#uselib "dwmapi.dll"
+#func DwmGetColorizationColor "DwmGetColorizationColor" sptr,sptr
+dim clr
+dim opaque
+
+title "バッテリー ディスプレイサンプル"
+
+#packopt version "ver_s.txt"
+
+	eco=1	// Eco有効(await無効)
+	batt_bf = -1 //前の状態不定
+	batt_disp = 2 * 500 // バッテリ表示時間 [ 秒 * 500 ]
+	batt_setw = 20		// バッテリ注意残量
+	batt_setd = 10		// バッテリ警告残量
+
+	// ツールバーウィンドウ初期化
+	bgscr 10,ginfo_dispx/20,ginfo_dispy,2,ginfo_dispx,0
+	celload "./dat/img/pwricon.png",4:celdiv 4,64,64
+
+	// バッテリウィンドウ初期化
+	bgscr 20,256,64,2,20,ginfo_dispy-132
+	color syc,syc,syc:boxf
+	gmode 0,256,64
+	buffer 21,256,64
+
+*mainloop
+	if eco = 1{
+		// Eco時に監視
+		regkey 0,"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize"
+		getreg app_mode,"SystemUsesLightTheme",0	// Windows規定のモード取得
+
+		// 取得 (0xAARRGGBB形式の16進数)
+		DwmGetColorizationColor varptr(clr), varptr(opaque)
+		// RGB値に変換
+		scr = clr>>16 & $FF
+		scg = clr>>8 & $FF
+		scb = clr & $FF
+		
+		GetSystemPowerStatus varptr (SYSTEM_POWER_STATUS) //毎回状態確認
+		batt_st=peek (SYSTEM_POWER_STATUS.0, 0) //電源接続状態
+		batt_rm=peek (SYSTEM_POWER_STATUS.0, 2) //電池残量
+
+		if app_mode=1 {
+			syc=217
+			stc=33
+		else {
+			syc=33
+			stc=217
+		}
+	}
+	
+
+///////
+gsel 0
+redraw 0
+color scr,scg,scb
+boxf
+repeat 2
+pos 5+cnt,5
+color syc,syc,syc
+mes "                                                                         limop\n"
+mes {"
+製作中の別アプリに追加機能を予定しているのでそのサンプルです。
+
+ラップトップのバッテリー残量を見れるアプリを制作しています。
+このウィンドウが出ている間、電源の供給状態を検知し、
+ACからの充電中や、バッテリー駆動が切り替わったときに左下にアニメーションを
+表示するアプリです。
+
+物は試し。やってみよう。
+デスクトップとか一部ラップトップでもバッテリー未対応のものは表示できません。
+あと「Windows 設定」の「個人用設定 > 色」の設定状況に応じて色も変わります。
+
+"}
+loop
+
+mes "現在Windowsに設定中のカラーは"
+mes strf("R:%d \tG:%d \tB:%d \n", scr, scg, scb)
+switch app_mode
+	case 0:mes "規定のWindowsモード ■ダークモード■":swbreak
+	case 1:mes "規定のWindowsモード □ライトモード□":swbreak
+	default:mes "規定のWindowsモード  取得できません"
+swend
+
+mes
+mes "Eco # ("+eco+")"
+mes "BatteryDisplay # ("+batt_st+", "+batt_rm+", "+batt_flag+", "+batt_lcnt+")"
+mes "Mouse ("+ginfo_mx+", "+ginfo_my+", "+ginfo_dispx+", "+ginfo_dispy+")"
+mes "RightTB # ("+rgtb_flag+", "+rgtb_ytmp+", "+rgtb_clk+")"
+
+redraw 1
+///////
+
+	if rgtb_flag=0 and ginfo_mx >= ginfo_dispx-5 {
+		// 右上か右下に来たら(ちょっと判定甘め)
+		if ginfo_my<=4 or ginfo_my>=ginfo_dispy-4 {
+			rgtb_flag=1 //フラグ準備
+		}
+	}
+
+	if rgtb_flag=1 {
+		// ちょっと逸れても良い
+		if ginfo_mx+1 >= ginfo_dispx-30 {
+			if ( ginfo_my >= ginfo_dispy/10 and ginfo_my <= ginfo_dispy/2 ) or ( ginfo_my <= ginfo_dispy-ginfo_dispy/10 and ginfo_my >= ginfo_dispy/2 ) {
+				// フラグ有効
+				rgtb_flag=2
+				//カウントリセット
+				rgtb_cnt=0
+				gosub *rgtbdisp1
+			}
+		}else{
+			//逸れすぎ
+			rgtb_flag=0
+		}
+	}
+	if rgtb_flag=2{
+		eco=0
+		if rgtb_cnt<=40 : rgtb_cnt+=1
+		stick rgtb_clk,768,0
+
+		if rgtb_cnt<=40{
+			gsel 10,2
+			setease 0,ginfo_dispx/20,ease_quad_out
+			ese=getease(rgtb_cnt,39)
+			width ginfo_dispx/20,ginfo_dispy,ginfo_dispx-ese,0
+		}
+		
+		if (ginfo_mx < ginfo_dispx-ginfo_dispx/20) {
+			// マウスツールバー以外
+			if ((rgtb_clk &256) or (rgtb_clk &512)) {
+				rgtb_flag=0
+				gsel 10,-1
+				eco = 1
+			}
+			rgtb_slct=-1
+		}else{
+			// マウスツールバー内
+			// POWER
+			if ginfo_my >= ginfo_dispy-160 and ginfo_my <= ginfo_dispy-78 and rgtb_slct!=1{
+				rgtb_updt=1
+				rgtb_slct=1
+			}
+			
+		}
+
+		if rgtb_updt=1{
+			gosub *rgtbdisp1
+			rgtb_updt=0
+		} 
+			
+	}
+
+//////
+	
+	if batt_st!=batt_bf { //抜き差ししたら
+		batt_flag=1 //フラグ有効
+		batt_lcnt=0 //ループカウント
+		batt_bf=batt_st //前の状態上書き
+	}
+	if batt_flag=1{
+		eco=0 // await有効
+		batt_lcnt+=1
+		
+		if batt_lcnt<=100{
+			// 前100フレーム
+			gsel 20,1
+			setease 0,20,ease_quad_out
+			ese=getease(batt_lcnt,99)
+			redraw 0
+			width 256,64,ese,ginfo_dispy-132
+			color syc,syc,syc:boxf
+		
+				setease 3,3+249*batt_rm/100,ease_quad_out
+				ese=getease(batt_lcnt-10,89)
+				color scr,scg,scb:boxf 3,3,ese,60
+		
+			color syc,syc,syc:textmode 1
+			color stc,stc,stc:font "Yu Gothic UI Semibold",16
+			pos 8,4
+			if batt_rm <= batt_setd {
+				// 残量無い
+				color 230,10,10:emes "Battery DANGER"
+			}else{
+				if batt_rm <= batt_setw {
+					// 残量低い
+					color 230,230,10:emes "Battery Warning"
+				}else{
+					if batt_rm = 100 {
+						// 残量MAX
+						emes "Full charged"
+					}else{
+						switch batt_st
+							case 1:emes "AC connected":swbreak
+							case 0:emes "Battery powered":swbreak
+							default:emes "Unknown"
+						swend
+					}
+				}	
+			}
+				
+			setease 0,batt_rm,ease_quad_out
+			ese=getease(batt_lcnt,99)
+			color stc,stc,stc:font "Yu Gothic UI Regular",40
+			pos 180,8
+			if ese>=100{
+				emes ""+ese
+			}else{
+				if ese>=10{
+					emes "  "+ese
+				}else{
+					emes "   "+ese
+				}
+			}
+			redraw 1
+		}
+
+		if batt_lcnt=batt_disp{
+			// 後100の前に
+			gsel 21:pos 0,0
+			gcopy 20,0,0,256,64
+		}
+		
+		if batt_lcnt>=batt_disp+100 and batt_lcnt<=batt_disp+200{
+			// 後100フレーム
+			gsel 20
+			redraw 0
+			setease -20,256,ease_quad_in
+			ese=getease(batt_lcnt- (batt_disp+100) ,99)
+			setease 20,-256,ease_quad_in
+			ese2=getease(batt_lcnt- (batt_disp+100) ,99)
+			pos 0,0
+			if ese<0 : ese=0
+			gcopy 21,ese,0,256,64
+			width 256-ese,-1,ese2,ginfo_dispy-132
+			redraw 1
+		}
+
+		if batt_lcnt>=batt_disp+200{
+			// 後片付け
+			gsel 20,-1
+			batt_flag=0 //フラグ無効
+			eco=1 //await無効
+		}
+	}
+	
+	if eco=0 { await 2 } else { wait 5 }
+	goto *mainloop
+
+*rgtbdisp1
+	gsel 10
+	redraw 0
+	color syc,syc,syc:boxf
+
+	color 128,128,128
+	switch rgtb_slct
+		case 1:boxf 0,ginfo_dispy-160,ginfo_dispx/20,ginfo_dispy-78:swbreak
+	swend
+	
+	color stc,stc,stc:font "Yu Gothic UI Semibold",ginfo_dispx/100
+
+	pos 4,250:mes "  TICKET"
+	gmode 2
+	pos (ginfo_sizex-64)/2,ginfo_dispy-160:celput 4,0
+	pos (ginfo_sizex-64)/2,ginfo_dispy-100:mes "POWER"
+	redraw 1
+	return
