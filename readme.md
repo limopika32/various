@@ -4,7 +4,7 @@
 何か使えそうと思ったら勝手に持って行って勝手に改変して良いです。ただ使用するときは自己責任でお願いしますね。
 
 ### ライセンス (LICENCE)
-特筆していない限り、この `various` リポジトリ内にある物は全て [MITライセンス](./LICENSE) に準拠しています。
+特筆していない限り、この `various` リポジトリ内にある物は全て [MITライセンス](./LICENSE) に準拠しています。<br>
 Released under the [MIT license.](./LICENSE)
 
 ## satellite/
